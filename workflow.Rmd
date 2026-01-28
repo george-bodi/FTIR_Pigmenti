@@ -8,9 +8,213 @@ date: "2026-01-15"
 ```{r}
 library(readxl)
 library(tidyverse)
-Book1 <- read_excel("Book1.xlsx", sheet = "cols = Lungimi de unda")
-d <- as_tibble(Book1)
+library(tibble)
+ftir_pigmenti <- read_excel("ftir_pigmenti_rev_2.xlsx")
+d <- as_tibble(ftir_pigmenti) |> 
+  rownames_to_column(var = "nume_rand") |> 
+  column_to_rownames(var = "Nume") |> 
+  mutate_if(is.character, as.factor)
+  
 
+```
+
+#EDA
+```{r}
+library(factoextra)
+library(FactoMineR)
+library(ggplot2)
+library(viridis)
+
+X <- PCA(d[,-c(1:6)], scale.unit = TRUE, graph = F)
+
+pca_res <- X$ind$coord |> 
+  as_tibble() |> 
+  rownames_to_column(var = "nume_rand")
+
+
+d <- d %>% 
+full_join(pca_res)
+
+
+d %>% 
+ggplot(aes(x = Dim.1, y = Dim.2, shape = Sursa, color = Lustru)) + 
+    geom_point(aes(size = 2), position = "dodge") +
+  geom_text(aes(
+    label = ID), 
+    nudge_x = 2, 
+    nudge_y = 2, 
+    check_overlap = T
+  ) +
+  geom_text(aes(
+    label = Angoba), 
+    nudge_x = 1, 
+    nudge_y = 1, 
+    check_overlap = T
+  ) +
+  ggtitle("PCA tot") +
+  scale_color_viridis(discrete = TRUE, option = "H")
+
+d %>% 
+ggplot(aes(x = Dim.1, y = Dim.2, shape = Sursa, color = Angoba)) + 
+    geom_point(aes(size = 2), position = "dodge") +
+  geom_text(aes(
+    label = ID), 
+    nudge_x = 2, 
+    nudge_y = 2, 
+    check_overlap = T
+  ) +
+  geom_text(aes(
+    label = Color), 
+    nudge_x = 1, 
+    nudge_y = 1, 
+    check_overlap = T
+  ) +
+  ggtitle("PCA tot") +
+  scale_color_viridis(discrete = TRUE, option = "H")
+
+
+d %>% filter(Color == "rosu") %>% 
+ggplot(aes(x = Dim.1, y = Dim.2, shape = Sursa, color = Angoba)) + 
+    geom_point(aes(size = 2), position = "dodge") +
+  geom_text(aes(
+    label = ID), 
+    nudge_x = 1, 
+    nudge_y = 1) +
+  ggtitle("PCA rosu") +
+  scale_color_viridis(discrete = TRUE, option = "H")
+
+d %>% filter(Color == "alb") %>% 
+ggplot(aes(x = Dim.1, y = Dim.2, shape = Sursa, color = Angoba)) + 
+    geom_point(aes(size = 2), position = "dodge") +
+  geom_text(aes(
+    label = ID), 
+    nudge_x = 1, 
+    nudge_y = 1, 
+    check_overlap = T
+  ) +
+  ggtitle("PCA alb") +
+  scale_color_viridis(discrete = TRUE, option = "H")
+
+d %>% filter(Color == "negru") %>% 
+ggplot(aes(x = Dim.1, y = Dim.2, shape = Sursa, color = Angoba)) + 
+    geom_point(aes(size = 2), position = "dodge") +
+  geom_text(aes(
+    label = ID), 
+    nudge_x = 1, 
+    nudge_y = 1, 
+    check_overlap = T
+  ) +
+  ggtitle("PCA negru") +
+  scale_color_viridis(discrete = TRUE, option = "H")
+
+d %>% filter(Color == "blank") %>% 
+ggplot(aes(x = Dim.1, y = Dim.2, shape = Angoba, color = Sursa)) + 
+    geom_point(aes(size = 2), position = "dodge") +
+  geom_text(aes(
+    label = ID), 
+    nudge_x = 2, 
+    nudge_y = 2, 
+    check_overlap = T
+  ) +
+  ggtitle("PCA blank") +
+  scale_color_viridis(discrete = TRUE, option = "H")
+
+d %>% filter(Sursa == "Luturi") %>% 
+ggplot(aes(x = Dim.1, y = Dim.2, shape = Angoba, color = Color)) + 
+    geom_point(aes(size = 2), position = "dodge") +
+  geom_text(aes(
+    label = ID), 
+    nudge_x = 2, 
+    nudge_y = 2, 
+    check_overlap = T
+  )+
+  ggtitle("PCA luturi") +
+   scale_color_viridis(discrete = TRUE, option = "H")
+
+d %>% filter(Sursa == "Placute") %>% 
+ggplot(aes(x = Dim.1, y = Dim.2, shape = Angoba, color = Color)) + 
+    geom_point(aes(size = 2), position = "dodge") +
+  geom_text(aes(
+    label = ID), 
+    nudge_x = 2, 
+    nudge_y = 2, 
+    check_overlap = T
+  ) +
+  ggtitle("PCA Placute") +
+  scale_color_viridis(discrete = TRUE, option = "H")
+
+
+```
+
+```{r}
+pca_var_contrib <- get_pca_var(X)$contrib |> 
+  as.data.frame() |> 
+  rownames_to_column()
+
+write_xlsx(pca_var_contrib, path = "C:/Users/georg/OneDrive/Proiecte_R/FTIR_Pigmenti/contributii_dim_1.xlsx")
+
+Dim.1 <- pca_var_cor |> slice_max(Dim.1, n = 150)
+ 
+  Dim.1 |> 
+  mutate(rowname = fct_reorder(rowname, Dim.1)) |> 
+  ggplot(aes(Dim.1, rowname)) +
+  geom_col() +
+  xlab(label = "Contribuții la CP 1") +
+  ylab(label = "")
+
+Dim.2 <- pca_var_cor |> slice_max(Dim.2, n = 150)
+
+write_xlsx(pca_var_contrib, path = "C:/Users/georg/OneDrive/Proiecte_R/FTIR_Pigmenti/contributii_dim_2.xlsx")
+
+ 
+graph_dim2_contrib <- 
+  Dim.2 |> 
+  mutate(rowname = fct_reorder(rowname, Dim.2)) |> 
+  ggplot(aes(Dim.2, rowname)) +
+  geom_col() +
+  xlab(label = "Contribuții la CP 2") +
+  ylab(label = "")
+
+
+  
+
+```
+
+```{r}
+library(writexl)
+
+pca_var_cor <- get_pca_var(X)$cor |> 
+  as.data.frame() |> 
+  rownames_to_column()
+write_xlsx(pca_var_cor, path = "C:/Users/georg/OneDrive/Proiecte_R/FTIR_Pigmenti/corelatii_dim_1si2.xlsx")
+
+
+
+Dim.1.cor <- bind_rows(pca_var_cor |> slice_max(Dim.1, n = 75), 
+  pca_var_cor |> slice_min(Dim.1, n = 75)
+  ) 
+ 
+
+
+graph_dim1_cor <- 
+  Dim.1.cor |> 
+  mutate(rowname = fct_reorder(rowname, Dim.1)) |> 
+  ggplot(aes(Dim.1, rowname)) +
+  geom_col() +
+  xlab(label = "Corelație cu CP 1") +
+  ylab(label = "")
+
+Dim.2.cor <- bind_rows(pca_var_cor |> slice_max(Dim.2, n = 75), 
+  pca_var_cor |> slice_min(Dim.2, n = 75)
+  ) 
+ 
+graph_dim2_cor <- 
+  Dim.2.cor |> 
+  mutate(rowname = fct_reorder(rowname, Dim.2)) |> 
+  ggplot(aes(Dim.2, rowname)) +
+  geom_col() +
+  xlab(label = "Corelație cu CP 2") +
+  ylab(label = "")
 
 ```
 
