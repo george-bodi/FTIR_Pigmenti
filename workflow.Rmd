@@ -4,7 +4,6 @@ output: html_document
 date: "2026-01-15"
 ---
 
-
 ```{r}
 library(readxl)
 library(tidyverse)
@@ -15,33 +14,36 @@ library(janitor)
 ftir_pigmenti <- read_excel("ftir_pigmenti_rev_3.xlsx") |> 
   as_tibble() |> 
   mutate(V2 = str_remove(V2, '\\..*')) %>% 
-  scrutiny::row_to_colnames(row = 1:5, collapse = "_", drop = F) %>% 
-  tibble(.name_repair = "unique") |> 
-  filter(duplicated(Sursa_ID_Color_Lustru_Angoba...2) == F)
+  scrutiny::row_to_colnames(row = 1:5, collapse = "_", drop = F) %>% tibble(.name_repair = "unique") |> 
+  filter(duplicated(Source_ID_Color_Luster_Slip...2) == F)
 
 d <- ftir_pigmenti |>  
   t() %>% 
   as_tibble() %>% 
 scrutiny::row_to_colnames(row = 1:2, collapse = "_", drop = T) |> 
 rownames_to_column(var = "ID") |> 
-  clean_names() |> 
- mutate_at(c(7:647), as.numeric) |> 
+  clean_names()|> 
+ mutate_at(c(7:646), as.numeric) |> 
     dplyr::rename("ID" = "id") |> 
-  unite(col = rowname, c(1,2,3), remove = F) |> 
+  unite(col = rowname, c(1,2,3,4,5), remove = F) |> 
   column_to_rownames(var = "rowname") |> 
   unite(col = rowname, c(1,2,3,4,5), remove = F)
 
-  
-
 ```
 
-
 ```{r}
+library(factoextra)
+library(FactoMineR)
+library(ggplot2)
+library(viridis)
+library(writexl)
+library(patchwork)
+
 gradient_col <- list(low = "black", 
                      mid = "white",
                      high = "red")
 
-df_centr <- d[,-c(1:6)] |> 
+df_centr <- d[,-c(1:8)] |> 
   scale() |> 
   as.data.frame() 
 
@@ -54,31 +56,17 @@ matrice_dist <- dist(df_centr, method = "minkowski")
 
 
 fviz_dist(matrice_dist, show_labels = T) +
-  labs(title = "Grafic 5. Tendințe de grupare",
-       subtitle = "Indice Hopkins: 0.9") 
-
-library(clValid)
-library(psych)
-
-distance_matrix <- distance(df_centr)
-
-distance_matrix <- as.matrix(distance_matrix)
-
-internal_validation <- clValid(distance_matrix, 2:4, 
-                               clMethods = c("hierarchical"),
-                               validation = c("internal", "stability"))
-
-summary(internal_validation)
+  labs(title = "...",
+       subtitle = "...") 
 
 clust_df <- eclust(df_centr,
                                FUNcluster = "agnes",
-                               #k = 2,
                                hc_metric = "minkowski",
                                hc_method = "ward.D2"
                                )
 
 dendro <- fviz_dend(clust_df) +
-  labs(title = "Grafic 6. Dendrograma") +
+  labs(title = "...") +
   theme_light()
 
 clust_df <- eclust(df_centr,
@@ -88,231 +76,737 @@ clust_df <- eclust(df_centr,
                                hc_method = "ward.D2"
                                )
 export_clus <- clust_df$cluster
-df$clustere <- as.factor(export_clus)
 
 plot_pca <- fviz_cluster(clust_df, 
              geom = "point",
              repel = T,
-             main = "Grafic 7. Proiecția clusterelor pe primele două componente principale",
-             subtitle = "Literele F, I și G denotă textura fină, intermediară, sau grosieră a fragmentului ceramic ",
-            legend.title = "Clustere") + 
+             main = "...",
+             subtitle = "...",
+            legend.title = "clusters") + 
   geom_text(label = d$rowname, 
             hjust = 0.5, 
             nudge_y = -0.09, 
             check_overlap = TRUE)
 plot_pca
 
+export_clus <- clust_df$cluster
 
 ```
 
-#EDA 
+#PCA on clusters
 
 ```{r}
-library(factoextra)
-library(FactoMineR)
-library(ggplot2)
-library(viridis)
-library(writexl)
-
-X <- PCA(d[,-c(1:6)], scale.unit = TRUE, graph = T)
+X <- PCA(d[,-c(1:8)], scale.unit = TRUE, graph = T)
 
 pca_res <- X$ind$coord |> as.data.frame() |> 
   as_tibble() |>
   rownames_to_column(var = "ID")
 
-d2 <- d %>% 
-full_join(pca_res) |> 
-  unite(col = rowname, c(1,2,3), remove = F) |> 
-  column_to_rownames(var = "rowname")
+d_sum <- d %>% 
+  full_join(pca_res) |> 
+  unite(col = rowname, c(1,2,3), remove = FALSE) |> 
+  column_to_rownames(var = "rowname") |> 
+  mutate(clusters = as.factor(export_clus)) |> 
+  mutate(across(where(is.character), as.factor)) |> 
+  mutate(scumming_scumming = case_when(
+    color_color == 'blank'          &
+    luster_luster == 'w/Luster'    &
+    source_source == 'Tablets'      &
+    slip_slip == 'w/o' ~ 'scumming'
+    )) |> 
+  mutate(slip_slip = case_when(
+    scumming_scumming == 'scumming' ~ 'scumming',
+    TRUE ~ slip_slip   # keep original value if conditions not met
+  )) |> 
+  select(-scumming_scumming)
 
-
-```
-
-
-```{r}
-write_xlsx(d_wide, path = "C:/Users/georg/OneDrive/Proiecte_R/FTIR_Pigmenti/ftir_date_full_cu_PCA.xlsx")
-```
-
-
-```{r}
-d %>% 
-ggplot(aes(x = Dim.1, y = Dim.2, shape = sursa_sursa, color = color_color)) + 
-    geom_point(aes(size = 2), position = "dodge") +
-  geom_text(aes(
-    label = lustru_lustru), 
-    nudge_x = 2, 
-    nudge_y = 2, 
-    check_overlap = T
-  ) +
-  geom_text(aes(
-    label = angoba_angoba), 
-    nudge_x = 1, 
-    nudge_y = 1, 
-    check_overlap = T
-  ) +
-  ggtitle("PCA tot") +
-  scale_color_viridis(discrete = TRUE, option = "H")
-
-d %>% 
-ggplot(aes(x = Dim.1, y = Dim.2, shape = Sursa, color = Angoba)) + 
-    geom_point(aes(size = 2), position = "dodge") +
-  geom_text(aes(
-    label = ID), 
-    nudge_x = 2, 
-    nudge_y = 2, 
-    check_overlap = T
-  ) +
-  geom_text(aes(
-    label = Color), 
-    nudge_x = 1, 
-    nudge_y = 1, 
-    check_overlap = T
-  ) +
-  ggtitle("PCA tot") +
-  scale_color_viridis(discrete = TRUE, option = "H")
-
-
-d %>% filter(Color %in% "rosu") %>% 
-ggplot(aes(x = Dim.1, y = Dim.2, shape = Sursa, color = Angoba)) + 
-    geom_point(aes(size = 2), position = "dodge") +
-  geom_text(aes(
-    label = ID), 
-    nudge_x = 1, 
-    nudge_y = 1) +
-  ggtitle("PCA rosu") +
-  scale_color_viridis(discrete = TRUE, option = "H")
-
-d %>% filter(Color %in% "alb") %>% 
-ggplot(aes(x = Dim.1, y = Dim.2, shape = Sursa, color = Angoba)) + 
-    geom_point(aes(size = 2), position = "dodge") +
-  geom_text(aes(
-    label = ID), 
-    nudge_x = 1, 
-    nudge_y = 1, 
-    check_overlap = T
-  ) +
-  ggtitle("PCA alb") +
-  scale_color_viridis(discrete = TRUE, option = "H")
-
-d %>% filter(Color %in% "negru") %>% 
-ggplot(aes(x = Dim.1, y = Dim.2, shape = Sursa, color = Angoba)) + 
-    geom_point(aes(size = 2), position = "dodge") +
-  geom_text(aes(
-    label = ID), 
-    nudge_x = 1, 
-    nudge_y = 1, 
-    check_overlap = T
-  ) +
-  ggtitle("PCA negru") +
-  scale_color_viridis(discrete = TRUE, option = "H")
-
-d %>% filter(Color %in% "blank") %>% 
-ggplot(aes(x = Dim.1, y = Dim.2, shape = Angoba, color = Sursa)) + 
-    geom_point(aes(size = 2), position = "dodge") +
-  geom_text(aes(
-    label = ID), 
-    nudge_x = 2, 
-    nudge_y = 2, 
-    check_overlap = T
-  ) +
-  ggtitle("PCA blank") +
-  scale_color_viridis(discrete = TRUE, option = "H")
-
-d %>% filter(Sursa %in% "Luturi") %>% 
-ggplot(aes(x = Dim.1, y = Dim.2, shape = Angoba, color = Color)) + 
-    geom_point(aes(size = 2), position = "dodge") +
-  geom_text(aes(
-    label = ID), 
-    nudge_x = 2, 
-    nudge_y = 2, 
-    check_overlap = T
-  ) +
-  ggtitle("PCA luturi") +
-   scale_color_viridis(discrete = TRUE, option = "H")
-
-d %>% filter(Sursa %in% "Placute") %>% 
-ggplot(aes(x = Dim.1, y = Dim.2, shape = Angoba, color = Color)) + 
-    geom_point(aes(size = 2), position = "dodge") +
-  geom_text(aes(
-    label = ID), 
-    nudge_x = 2, 
-    nudge_y = 2, 
-    check_overlap = T
-  ) +
-  ggtitle("PCA Placute") +
-  scale_color_viridis(discrete = TRUE, option = "H")
-
-
-```
-
-```{r}
-pca_var_contrib <- get_pca_var(X)$contrib |> 
+summary_d <- d_sum |> 
+  group_by(clusters) |> 
+  summarise(
+    count = n(),
+    blank = sum(color_color == "blank"),
+    red = sum(color_color == "red"),
+    black = sum(color_color == "black"),
+    white = sum(color_color == "white"),
+    brown = sum(color_color == "brown"),
+    Fe_Mn = sum(color_color == "Fe&Mn"),
+    w_luster = sum(luster_luster == "w/Luster"),
+    wo_luster = sum(luster_luster == "w/o Luster"),
+    tablets = sum(source_source == "Tablets"),
+    clays = sum(source_source == "Clays"),
+    pigments = sum(source_source == "Pigments"),
+    arch = sum(source_source == "Arch"),
+    w_slip = sum(slip_slip == "slip"),
+    wo_slip = sum(slip_slip == "w/o"),
+    scumming = sum(slip_slip == "scumming")
+  ) |> 
+  t() |> #transpose
   as.data.frame() |> 
-  rownames_to_column()
+  row_to_names(row_number = 1)
 
-pca_var_cor <- get_pca_var(X)$cor |> 
+d_sum |> count(clusters)
+
+d_sum |> group_by(clusters) |> 
+  count(source_source,color_color, sort = T) |> 
+  arrange(clusters) |>
+  print(n = 29)
+
+d_sum |> group_by(clusters) |> 
+  count(slip_slip, luster_luster, sort = T) |> 
+  arrange(clusters, slip_slip) |>
+  print(n = 40) 
+
+d_sum |> 
+  group_by(clusters) |> 
+  count(luster_luster, sort = TRUE) |> 
+  arrange(clusters, luster_luster) |> 
+  ggplot(aes(x = clusters, y = n, 
+             fill = interaction(luster_luster))) +
+  geom_col(position = "dodge") +   # or "stack" depending on desired look
+  labs(x = "Cluster", 
+       y = "Count", 
+       fill = "Legend") +
+  theme_minimal() +
+  scale_fill_viridis(discrete = T)
+
+d_sum |> 
+  group_by(clusters) |> 
+  count(slip_slip, sort = TRUE) |> 
+  arrange(clusters, slip_slip) |> 
+  ggplot(aes(x = clusters, y = n, 
+             fill = interaction(slip_slip))) +
+  geom_col(position = "dodge") +   # or "stack" depending on desired look
+  labs(x = "Cluster", 
+       y = "Count", 
+       fill = "Legend") +
+  theme_minimal() +
+  scale_fill_viridis(discrete = T)
+
+d_sum |> 
+  group_by(clusters) |> 
+  count(color_color, sort = TRUE) |> 
+  arrange(clusters, color_color) |> 
+  ggplot(aes(x = clusters, y = n, 
+             fill = interaction(color_color))) +
+  geom_col(position = "dodge") +   # or "stack" depending on desired look
+  labs(x = "Cluster", 
+       y = "Count", 
+       fill = "Legend") +
+  theme_minimal() +
+  scale_fill_viridis(discrete = T)
+
+d_sum |> 
+  group_by(clusters) |> 
+  count(slip_slip, luster_luster, color_color, sort = TRUE) |> 
+  arrange(clusters) |> 
+  # Create a single label that identifies each bar uniquely
+  mutate(bar_label = paste(clusters, slip_slip, luster_luster, color_color, sep = " | ")) |> 
+  ggplot(aes(x = bar_label, y = n)) +
+  geom_col() +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 65, hjust = 1)) +
+  labs(x = "Cluster | slip | lustre | color", y = "Count")
+
+d_sum |> group_by(clusters) |> 
+  count(slip_slip,luster_luster, sort = T) |> 
+  arrange(clusters)
+
+```
+
+######PCA - visualisations - eigen values
+
+```{r}
+eigen_values <- X$eig |> 
+  as_tibble() |> 
+  rownames_to_column() |> 
+    janitor::clean_names() |> 
+  arrange(desc(percentage_of_variance)) 
+
+
+graph_eigen <- eigen_values |> 
+    top_n(8, percentage_of_variance) |>
+  mutate(percentage_of_variance = round(percentage_of_variance, 2)) |> 
+  ggplot(aes(rowname, percentage_of_variance)) +
+  geom_col() +
+  geom_text(aes(label = percentage_of_variance, 
+                vjust = 1.5)
+            ) +
+  xlab(label = "Principal Components") +
+  ylab(label = "Percentage of variation explained") +
+  labs(title = "...")
+graph_eigen
+```
+
+######PCA - visualisations - variables
+
+```{r}
+contrib_var_selection <- X$var$contrib |> 
   as.data.frame() |> 
-  rownames_to_column()
+  rownames_to_column() |> 
+  mutate_if(is.character, as.factor) 
 
-write_xlsx(pca_var_contrib, path = "C:/Users/georg/OneDrive/Proiecte_R/FTIR_Pigmenti/contributii_dim_1.xlsx")
-
-Dim.1 <- pca_var_cor |> slice_max(Dim.1, n = 50)
- 
-Dim.1 |> 
+graph_dim1_contrib <- 
+  contrib_var_selection |> 
+  top_n(75, Dim.1) |>
   mutate(rowname = fct_reorder(rowname, Dim.1)) |> 
   ggplot(aes(Dim.1, rowname)) +
   geom_col() +
-  xlab(label = "Contribuții la CP 1") +
+  xlab(label = "...") +
   ylab(label = "")
 
-Dim.2 <- pca_var_cor |> slice_max(Dim.2, n = 50)
 
-write_xlsx(pca_var_contrib, path = "C:/Users/georg/OneDrive/Proiecte_R/FTIR_Pigmenti/contributii_dim_2.xlsx")
-
- 
-Dim.2 |> 
+graph_dim2_contrib <- 
+  contrib_var_selection |> 
+  top_n(75, Dim.2) |>
   mutate(rowname = fct_reorder(rowname, Dim.2)) |> 
   ggplot(aes(Dim.2, rowname)) +
   geom_col() +
-  xlab(label = "Contribuții la CP 2") +
+  xlab(label = "...") +
   ylab(label = "")
 
 
+cors_var <- X$var$cor |> 
+  as.data.frame() |> 
+  rownames_to_column() |> 
+  mutate_if(is.character, as.factor) 
+
+graph_dim1_cors <- 
+  cors_var |> 
+  top_n(75, Dim.1) |>
+  mutate(rowname = fct_reorder(rowname, Dim.1, .desc = T)) |> 
+  ggplot(aes(Dim.1, rowname)) +
+  geom_col() +
+  theme(axis.text = element_text(size = 9, face = "bold"),
+        axis.title = element_text(face = "bold")
+        ) + 
+  xlab(label = "...") +
+  ylab(label = "") 
   
 
+graph_dim2_cors <- 
+  cors_var |> 
+  top_n(75, Dim.2) |>
+  mutate(rowname = fct_reorder(rowname, Dim.2, .desc = T)) |> 
+  ggplot(aes(Dim.2, fct_reorder(rowname, Dim.2))) +
+  geom_col() +
+  theme(axis.title = element_text(face = "bold"),
+        axis.text = element_text(size = 9, face = "bold")
+        ) + 
+  xlab(label = "...") +
+  ylab(label = "") 
+
+
+
 ```
+
+######PCA - visualisations - cases
 
 ```{r}
-library(writexl)
-
-pca_var_cor <- get_pca_var(X)$cor |> 
+coord_ind <- 
+  X$ind$coord |> 
   as.data.frame() |> 
-  rownames_to_column()
-write_xlsx(pca_var_cor, path = "C:/Users/georg/OneDrive/Proiecte_R/FTIR_Pigmenti/corelatii_dim_1si2.xlsx")
+  mutate_if(is.character, as.factor) |> 
+  rownames_to_column() |> 
+  as_tibble()
+  
 
-
-
-Dim.1.cor <- bind_rows(pca_var_cor |> slice_max(Dim.1, n = 50), 
-  pca_var_cor |> slice_min(Dim.1, n = 50)
-  ) 
- 
-
-Dim.1.cor |> 
-  mutate(rowname = fct_reorder(rowname, Dim.1)) |> 
+graph_ind_1 <- coord_ind |> 
+  mutate(rowname = fct_reorder(rowname, Dim.1, .desc = T)) |> 
   ggplot(aes(Dim.1, rowname)) +
-  geom_col() +
-  xlab(label = "Corelație cu CP 1") +
-  ylab(label = "")
+  geom_col(aes(colour = d2$clusters, fill = d2$clusters)) +
+  theme(legend.position = "inside",
+    legend.position.inside = c(1,1),
+    legend.justification.inside = c(1,1),
+    axis.text = element_text(size = 9, face = "bold"),
+    axis.title = element_text(face = "bold")
+    ) + 
+  xlab(label =  "...") + 
+  ylab(label =  "...") +
+  scale_fill_viridis(discrete = T) +
+  scale_color_viridis_d() +
+  guides(fill = guide_legend(title = "clusters")) +
+  guides(color = F)
 
-Dim.2.cor <- bind_rows(pca_var_cor |> slice_max(Dim.2, n = 50), 
-  pca_var_cor |> slice_min(Dim.2, n = 50)
-  ) 
- 
-Dim.2.cor |> 
-  mutate(rowname = fct_reorder(rowname, Dim.2)) |> 
+graph_ind_2 <- coord_ind |> 
+  mutate(rowname = fct_reorder(rowname, Dim.2, .desc = T)) |> 
   ggplot(aes(Dim.2, rowname)) +
-  geom_col() +
-  xlab(label = "Corelație cu CP 2") +
-  ylab(label = "")
+  geom_col(aes(colour = d2$clusters, fill = d2$clusters)) +
+  theme(legend.position = "inside",
+    legend.position.inside = c(1,1),
+    legend.justification.inside = c(1,1),
+    axis.text = element_text(size = 9, face = "bold"),
+    axis.title = element_text(face = "bold")
+    ) + 
+  xlab(label =  "...") + 
+  ylab(label =  "...") +
+  scale_fill_viridis(discrete = T) +
+  scale_color_viridis_d() +
+  guides(fill = guide_legend(title = "clusters")) +
+  guides(color = F)
+
 
 ```
+
+PCA - bring it home
+
+```{r}
+graph_CP1 <- graph_dim1_cors / graph_ind_1 +
+  plot_annotation(title = "CP 1")
+graph_CP2 <- graph_dim2_cors / graph_ind_2 +
+  plot_annotation(title = "CP 2")
+graph_CP1
+graph_CP2
+
+```
+
+# Select white bandwiths
+
+```{r}
+d2 <- ftir_pigmenti |> 
+    filter(Source_ID_Color_Luster_Slip...2 >= 1000 & Source_ID_Color_Luster_Slip...2 <= 1600) 
+
+d3 <- d2 |> 
+   data.table::transpose() 
+
+rownames(d3) <- colnames(d2)
+
+d3 <- d3 |>  
+  scrutiny::row_to_colnames(row = 1:2, collapse = "_", drop = T) |> 
+  clean_names() |> 
+  mutate(across(where(is.character), as.numeric)) |> 
+  rownames_to_column(var = "full_info") |> 
+  separate(col = full_info, into = c("source","id", "color", "luster", "slip"), sep = "_", remove = F) |> 
+   mutate(slip = str_remove_all(slip, "\\.\\.\\.\\d+")) |> 
+  rownames_to_column(var = "ID") |> 
+  column_to_rownames(var = "full_info")
+  
+library(factoextra)
+library(FactoMineR)
+library(ggplot2)
+library(viridis)
+library(writexl)
+library(patchwork)
+library(clValid)
+
+df_centr_scumm <- d3[,-c(1:6)] |> 
+  scale() |> 
+  as.data.frame() 
+
+distance_matrix_scumm <- psych::distance(df_centr_scumm)
+distance_matrix_scumm <- as.matrix(distance_matrix_scumm)
+internal_validation_scumm <- clValid(distance_matrix_scumm, 2:8, 
+                               clMethods = c("agnes"),
+                               validation = c("internal", "stability"))
+summary(internal_validation_scumm)
+
+
+dist_mat_scumm <- get_dist(df_centr_scumm, method = "minkowski")
+
+h_clusts_scumm <- hclust(dist_mat_scumm, method = "ward.D2")  
+ plot(h_clusts_scumm)
+ 
+clust_scumming <- eclust(df_centr_scumm,
+                     k = 2,
+                     FUNcluster = "agnes",
+                     hc_metric = "minkowski",
+                     hc_method = "ward.D2"
+                     )  
+fviz_dend(clust_scumming)
+
+
+clust <- clust_scumming$cluster
+d3$clusters <- clust
+
+pca_res_2 <- PCA(d3[,-c(1:6, 138)], 
+                    graph = F,
+                    )
+fviz_pca_biplot(pca_res_2, 
+                habillage = d3$clusters) 
+
+pca_2_df <- pca_res_2$ind$coord |> as.data.frame() |> 
+  as_tibble() |>
+  rownames_to_column(var = "ID")
+
+d_sum_2 <- d3 %>% 
+  full_join(pca_2_df) |> 
+  rownames_to_column() |> 
+  unite(col = rowname, c(1,2,3,4,5,6), remove = FALSE) |> 
+  column_to_rownames(var = "rowname") |> 
+  mutate(clusters = as.factor(clusters)) |> 
+  mutate(across(where(is.character), as.factor))
+
+summary_d3 <- d_sum_2 |> 
+  group_by(clusters) |> 
+  summarise(
+    count = n(),
+    blank = sum(color == "blank"),
+    red = sum(color == "red"),
+    black = sum(color == "black"),
+    white = sum(color == "white"),
+    brown = sum(color == "brown"),
+    Fe_Mn = sum(color == "Fe&Mn"),
+    w_luster = sum(luster == "w/Luster"),
+    wo_luster = sum(luster == "w/o Luster"),
+    tablets = sum(source == "Tablets"),
+    clays = sum(source == "Clays"),
+    pigments = sum(source == "Pigments"),
+    arch = sum(source == "Arch"),
+    w_slip = sum(slip == "slip"),
+    wo_slip = sum(slip == "w/o"),
+    scumming = sum(slip == "scumming")
+  ) |> 
+  t() |> #transpose
+  as.data.frame() |> 
+  row_to_names(row_number = 1)
+
+d_sum_2 |> count(clusters)
+
+d_sum_2 |> group_by(clusters) |> 
+  count(source,color, sort = T) |> 
+  arrange(clusters) |>
+  print(n = 29)
+
+d_sum_2 |> group_by(clusters) |> 
+  count(slip, luster, sort = T) |> 
+  arrange(clusters, slip) |>
+  print(n = 40) 
+
+d_sum_2 |> 
+  group_by(clusters) |> 
+  count(luster, sort = TRUE) |> 
+  arrange(clusters, luster) |> 
+  ggplot(aes(x = clusters, y = n, 
+             fill = interaction(luster))) +
+  geom_col(position = "dodge") +   # or "stack" depending on desired look
+  labs(x = "Cluster", 
+       y = "Count", 
+       fill = "Legend") +
+  theme_minimal() +
+  scale_fill_viridis(discrete = T)
+
+d_sum_2 |> 
+  group_by(clusters) |> 
+  count(slip, sort = TRUE) |> 
+  arrange(clusters, slip) |> 
+  ggplot(aes(x = clusters, y = n, 
+             fill = interaction(slip))) +
+  geom_col(position = "dodge") +   # or "stack" depending on desired look
+  labs(x = "Cluster", 
+       y = "Count", 
+       fill = "Legend") +
+  theme_minimal() +
+  scale_fill_viridis(discrete = T)
+
+d_sum_2 |> 
+  group_by(clusters) |> 
+  count(color, sort = TRUE) |> 
+  arrange(clusters, color) |> 
+  ggplot(aes(x = clusters, y = n, 
+             fill = interaction(color))) +
+  geom_col(position = "dodge") +   # or "stack" depending on desired look
+  labs(x = "Cluster", 
+       y = "Count", 
+       fill = "Legend") +
+  theme_minimal() +
+  scale_fill_viridis(discrete = T)
+
+d_sum_2 |> 
+  group_by(clusters) |> 
+  count(slip, luster, color, sort = TRUE) |> 
+  arrange(clusters) |> 
+  # Create a single label that identifies each bar uniquely
+  mutate(bar_label = paste(clusters, slip, luster, color, sep = " | ")) |> 
+  ggplot(aes(x = bar_label, y = n)) +
+  geom_col() +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 65, hjust = 1)) +
+  labs(x = "Cluster | slip | lustre | color", y = "Count")
+
+d_sum_2 |> group_by(clusters) |> 
+  count(slip,luster, sort = T) |> 
+  arrange(clusters)
+
+```
+
+
+#Three clusters exploration
+```{r}
+
+clust_scumming_3 <- eclust(df_centr,
+                     k = 3,
+                     FUNcluster = "agnes",
+                     hc_metric = "minkowski",
+                     hc_method = "ward.D2"
+                     )  
+fviz_dend(clust_scumming_3)
+
+
+clust <- clust_scumming_3$cluster
+d3$clusters <- clust
+
+
+fviz_pca_biplot(pca_res_2, 
+                habillage = d3$clusters) 
+
+
+d_sum_3 <- d3 %>% 
+  full_join(pca_2_df) |> 
+  rownames_to_column() |> 
+  unite(col = rowname, c(1,2,3,4,5,6), remove = FALSE) |> 
+  column_to_rownames(var = "rowname") |> 
+  mutate(clusters = as.factor(clusters)) |> 
+  mutate(across(where(is.character), as.factor))
+
+summary_d3_3 <- d_sum_3 |> 
+  group_by(clusters) |> 
+  summarise(
+    count = n(),
+    blank = sum(color == "blank"),
+    red = sum(color == "red"),
+    black = sum(color == "black"),
+    white = sum(color == "white"),
+    brown = sum(color == "brown"),
+    Fe_Mn = sum(color == "Fe&Mn"),
+    w_luster = sum(luster == "w/Luster"),
+    wo_luster = sum(luster == "w/o Luster"),
+    tablets = sum(source == "Tablets"),
+    clays = sum(source == "Clays"),
+    pigments = sum(source == "Pigments"),
+    arch = sum(source == "Arch"),
+    w_slip = sum(slip == "slip"),
+    wo_slip = sum(slip == "w/o"),
+    scumming = sum(slip == "scumming")
+  ) |> 
+  t() |> #transpose
+  as.data.frame() |> 
+  row_to_names(row_number = 1)
+
+d_sum_3 |> count(clusters)
+
+d_sum_3 |> group_by(clusters) |> 
+  count(source,color, sort = T) |> 
+  arrange(clusters) |>
+  print(n = 29)
+
+d_sum_3 |> group_by(clusters) |> 
+  count(slip, luster, sort = T) |> 
+  arrange(clusters, slip) |>
+  print(n = 40) 
+
+d_sum_3 |> 
+  group_by(clusters) |> 
+  count(luster, sort = TRUE) |> 
+  arrange(clusters, luster) |> 
+  ggplot(aes(x = clusters, y = n, 
+             fill = interaction(luster))) +
+  geom_col(position = "dodge") +   # or "stack" depending on desired look
+  labs(x = "Cluster", 
+       y = "Count", 
+       fill = "Legend") +
+  theme_minimal() +
+  scale_fill_viridis(discrete = T)
+
+d_sum_3 |> 
+  group_by(clusters) |> 
+  count(slip, sort = TRUE) |> 
+  arrange(clusters, slip) |> 
+  ggplot(aes(x = clusters, y = n, 
+             fill = interaction(slip))) +
+  geom_col(position = "dodge") +   # or "stack" depending on desired look
+  labs(x = "Cluster", 
+       y = "Count", 
+       fill = "Legend") +
+  theme_minimal() +
+  scale_fill_viridis(discrete = T)
+
+d_sum_3 |> 
+  group_by(clusters) |> 
+  count(color, sort = TRUE) |> 
+  arrange(clusters, color) |> 
+  ggplot(aes(x = clusters, y = n, 
+             fill = interaction(color))) +
+  geom_col(position = "dodge") +   # or "stack" depending on desired look
+  labs(x = "Cluster", 
+       y = "Count", 
+       fill = "Legend") +
+  theme_minimal() +
+  scale_fill_viridis(discrete = T)
+
+d_sum_3 |> 
+  group_by(clusters) |> 
+  count(slip, luster, color, sort = TRUE) |> 
+  arrange(clusters) |> 
+  # Create a single label that identifies each bar uniquely
+  mutate(bar_label = paste(clusters, slip, luster, color, sep = " | ")) |> 
+  ggplot(aes(x = bar_label, y = n)) +
+  geom_col() +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 65, hjust = 1)) +
+  labs(x = "Cluster | slip | lustre | color", y = "Count")
+
+d_sum_3 |> group_by(clusters) |> 
+  count(slip,luster, sort = T) |> 
+  arrange(clusters)
+
+```
+
+# Verificare benzi 600-700
+
+```{r}
+d_verif <- ftir_pigmenti |> 
+    filter(Source_ID_Color_Luster_Slip...2 >= 600 & Source_ID_Color_Luster_Slip...2 <= 7000) 
+
+d_veriff <- d_verif |> 
+   data.table::transpose() 
+
+rownames(d_veriff) <- colnames(d_verif)
+
+d_veriff <- d_veriff |>  
+  scrutiny::row_to_colnames(row = 1:2, collapse = "_", drop = T) |> 
+  clean_names() |> 
+  mutate(across(where(is.character), as.numeric)) |> 
+  rownames_to_column(var = "full_info") |> 
+  separate(col = full_info, into = c("source","id", "color", "luster", "slip"), sep = "_", remove = F) |> 
+   mutate(slip = str_remove_all(slip, "\\.\\.\\.\\d+")) |> 
+  rownames_to_column(var = "ID") |> 
+  column_to_rownames(var = "full_info")
+ 
+df_veriff_centr <- d_veriff[,-c(1:6)] |> 
+  scale() |> 
+  as.data.frame() 
+
+distance_matrix_veriff <- psych::distance(df_veriff_centr)
+distance_matrix_veriff <- as.matrix(distance_matrix_veriff)
+internal_validation_veriff <- clValid(distance_matrix_veriff, 2:8, 
+                               clMethods = c("agnes"),
+                               validation = c("internal", "stability"))
+summary(internal_validation_veriff)
+
+
+dist_mat_veriff <- get_dist(df_veriff_centr, method = "minkowski")
+
+h_clusts_veriff <- hclust(dist_mat_veriff, method = "ward.D2")  
+ plot(h_clusts_veriff)
+ 
+clust_veriff <- eclust(df_veriff_centr,
+                     k = 2,
+                     FUNcluster = "agnes",
+                     hc_metric = "minkowski",
+                     hc_method = "ward.D2"
+                     )  
+fviz_dend(clust_veriff)
+
+
+clust_veriff <- clust_veriff$cluster
+d3$clusters <- clust_veriff
+
+pca_res_3 <- PCA(d3[,-c(1:6, 138)], 
+                    graph = F,
+                    )
+fviz_pca_biplot(pca_res_3, 
+                habillage = d3$clusters) 
+
+pca_veriff_df <- pca_res_3$ind$coord |> as.data.frame() |> 
+  as_tibble() |>
+  rownames_to_column(var = "ID")
+
+d_sum_3 <- d3 %>% 
+  full_join(pca_veriff_df) |> 
+  rownames_to_column() |> 
+  unite(col = rowname, c(1,2,3,4,5,6), remove = FALSE) |> 
+  column_to_rownames(var = "rowname") |> 
+  mutate(clusters = as.factor(clusters)) |> 
+  mutate(across(where(is.character), as.factor))
+
+summary_d3_veriff <- d_sum_3 |> 
+  group_by(clusters) |> 
+  summarise(
+    count = n(),
+    blank = sum(color == "blank"),
+    red = sum(color == "red"),
+    black = sum(color == "black"),
+    white = sum(color == "white"),
+    brown = sum(color == "brown"),
+    Fe_Mn = sum(color == "Fe&Mn"),
+    w_luster = sum(luster == "w/Luster"),
+    wo_luster = sum(luster == "w/o Luster"),
+    tablets = sum(source == "Tablets"),
+    clays = sum(source == "Clays"),
+    pigments = sum(source == "Pigments"),
+    arch = sum(source == "Arch"),
+    w_slip = sum(slip == "slip"),
+    wo_slip = sum(slip == "w/o"),
+    scumming = sum(slip == "scumming")
+  ) |> 
+  t() |> #transpose
+  as.data.frame() |> 
+  row_to_names(row_number = 1)
+
+d_sum_3 |> count(clusters)
+
+d_sum_2 |> group_by(clusters) |> 
+  count(source,color, sort = T) |> 
+  arrange(clusters) |>
+  print(n = 29)
+
+d_sum_3 |> group_by(clusters) |> 
+  count(slip, luster, sort = T) |> 
+  arrange(clusters, slip) |>
+  print(n = 40) 
+
+d_sum_3 |> 
+  group_by(clusters) |> 
+  count(luster, sort = TRUE) |> 
+  arrange(clusters, luster) |> 
+  ggplot(aes(x = clusters, y = n, 
+             fill = interaction(luster))) +
+  geom_col(position = "dodge") +   # or "stack" depending on desired look
+  labs(x = "Cluster", 
+       y = "Count", 
+       fill = "Legend") +
+  theme_minimal() +
+  scale_fill_viridis(discrete = T)
+
+d_sum_3 |> 
+  group_by(clusters) |> 
+  count(slip, sort = TRUE) |> 
+  arrange(clusters, slip) |> 
+  ggplot(aes(x = clusters, y = n, 
+             fill = interaction(slip))) +
+  geom_col(position = "dodge") +   # or "stack" depending on desired look
+  labs(x = "Cluster", 
+       y = "Count", 
+       fill = "Legend") +
+  theme_minimal() +
+  scale_fill_viridis(discrete = T)
+
+d_sum_3 |> 
+  group_by(clusters) |> 
+  count(color, sort = TRUE) |> 
+  arrange(clusters, color) |> 
+  ggplot(aes(x = clusters, y = n, 
+             fill = interaction(color))) +
+  geom_col(position = "dodge") +   # or "stack" depending on desired look
+  labs(x = "Cluster", 
+       y = "Count", 
+       fill = "Legend") +
+  theme_minimal() +
+  scale_fill_viridis(discrete = T)
+
+d_sum_3 |> 
+  group_by(clusters) |> 
+  count(slip, luster, color, sort = TRUE) |> 
+  arrange(clusters) |> 
+  # Create a single label that identifies each bar uniquely
+  mutate(bar_label = paste(clusters, slip, luster, color, sep = " | ")) |> 
+  ggplot(aes(x = bar_label, y = n)) +
+  geom_col() +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 65, hjust = 1)) +
+  labs(x = "Cluster | slip | lustre | color", y = "Count")
+
+d_sum_3 |> group_by(clusters) |> 
+  count(slip,luster, sort = T) |> 
+  arrange(clusters)
+```
+
