@@ -1,6 +1,8 @@
 ---
 title: "workflow"
-output: html_document
+output:
+  word_document: default
+  html_document: default
 date: "2026-01-15"
 ---
 
@@ -41,7 +43,71 @@ d3 <-  d3 |>
   rownames_to_column(var = "ID") |> 
   unite("rowname", "ID", "id", "slip", remove = F) |> 
   column_to_rownames("rowname")
+
 ```
+
+
+# FTIR pre-processing
+
+```{r}
+# ---------------------------
+# FTIR pre‑processing robustness assessment
+# ---------------------------
+# Assumes the data frame 'd3' already exists, with metadata columns 1-7 
+# and spectral columns starting at column 8 (wavenumbers 1000–1600 cm⁻¹).
+# The variable 'wavenumbers' contains the numeric labels of those columns.
+
+library(prospectr)   # standardNormalVariate, savitzkyGolay
+library(clValid)     # cluster validation
+library(dplyr)
+
+# Extract pure spectral matrix (samples × wavenumbers)
+spec_data <- d3[, 8:ncol(d3)]   # adjust indices if needed
+
+# 1. Baseline correction using the rubber-band method
+#    (requires the 'baseline' package)
+library(baseline)
+# List of spectra as a matrix (rows = samples, cols = wavenumbers)
+spec_mat <- as.matrix(spec_data)
+spec_bl <- baseline(spec_mat)
+spec_bl <- getCorrected(spec_bl)
+
+# 2. SNV (Standard Normal Variate) – on raw, baseline‑corrected, and derivative data
+spec_SNV_raw       <- prospectr::standardNormalVariate(spec_mat)
+spec_SNV_bl        <- prospectr::standardNormalVariate(spec_bl)
+
+# 3. Savitzky–Golay 1st derivative (2nd order polynomial, 11‑point window)
+#    applied after baseline correction + SNV (recommended pipeline)
+spec_d1 <- prospectr::savitzkyGolay(spec_SNV_bl, p = 2, w = 11, m = 1)
+
+# ---------- Define the four pre‑processing variants ----------
+preproc_list <- list(
+  "Raw + scale" = scale(spec_mat),              # original approach
+  "Baseline + scale" = scale(spec_bl),
+  "SNV (no deriv.)" = spec_SNV_bl,                  # SNV normalised, no further scaling
+  "SNV + 1st derivative" = scale(spec_d1)                # scaling optional but harmless
+)
+
+# ---------- Cluster validation for each variant ----------
+valid_res <- vector("list", length(preproc_list))
+names(valid_res) <- names(preproc_list)
+
+for (i in seq_along(preproc_list)) {
+  X <- preproc_list[[i]]
+  d <- dist(X, method = "euclidean")
+  d <- as.matrix(d)
+  valid_res[[i]] <- clValid(d, nClust = 2:6, clMethods = "agnes",
+                            validation = c("internal", "stability"))
+}
+
+# Print summaries – optimal k per variant
+for (nm in names(preproc_list)) {
+  cat("\n", nm, "\n")
+  print(summary(valid_res[[nm]]))
+}
+
+```
+
 
 # Hierarchical Clustering
 
@@ -54,32 +120,31 @@ library(writexl)
 library(patchwork)
 library(clValid)
 
-df_centr_scumm <- d3[,-c(1:7)] |> 
-  scale() |> 
-  as.data.frame() 
+spec_preproc <- as.data.frame(spec_d1) |> 
+  rownames_to_column("rows") |> 
+  rownames_to_column("ID")
 
-distance_matrix_scumm <- psych::distance(df_centr_scumm)
-distance_matrix_scumm <- as.matrix(distance_matrix_scumm)
-internal_validation_scumm <- clValid(distance_matrix_scumm, 2:8, 
-                               clMethods = c("agnes"),
-                               validation = c("internal", "stability"))
-summary(internal_validation_scumm)
+df_scumm <- left_join(spec_preproc, d3[, 1:7], by = "ID") |> 
+  relocate(where(is.character)) |> 
+  unite("rowname", "ID", "id", "luster", "slip", remove = F) |> 
+  column_to_rownames("rowname") |> 
+  select(-"rows")
+  
 
-
-dist_mat_scumm <- get_dist(df_centr_scumm, method = "minkowski")
+dist_mat_scumm <- get_dist(df_scumm[, 8:ncol(df_scumm)], method = "minkowski")
 
 h_clusts_scumm <- hclust(dist_mat_scumm, method = "ward.D2")  
- plot(h_clusts_scumm)
+plot(h_clusts_scumm)
  
 
 clust <- cutree(h_clusts_scumm, k = 2)
-d3$clusters <- clust
+df_scumm$clusters <- clust
 
-pca_res_2 <- PCA(d3[,-c(1:7, 139)], 
+pca_res_2 <- PCA(df_scumm[,-c(1:7, 139)], scale.unit = F,
                     graph = F
                  )
 fviz_pca_biplot(pca_res_2, 
-                habillage = d3$clusters,
+                habillage = df_scumm$clusters,
                 invisible = "var"
                 ) 
 
@@ -87,7 +152,7 @@ pca_2_df <- pca_res_2$ind$coord |> as.data.frame() |>
   as_tibble() |>
   rownames_to_column(var = "ID")
 
-d_sum_2 <- d3 %>% 
+d_sum_2 <- df_scumm %>% 
   full_join(pca_2_df) |> 
   rownames_to_column() |> 
   unite(col = rowname, c(1,2,3,4,5,6), remove = FALSE) |> 
@@ -95,7 +160,7 @@ d_sum_2 <- d3 %>%
   mutate(clusters = as.factor(clusters)) |> 
   mutate(across(where(is.character), as.factor))
 
-summary_d3 <- d_sum_2 |> 
+summary_df_scumm <- d_sum_2 |> 
   group_by(clusters) |> 
   summarise(
     count = n(),
@@ -118,6 +183,8 @@ summary_d3 <- d_sum_2 |>
   t() |> #transpose
   as.data.frame() |> 
   row_to_names(row_number = 1)
+
+summary_df_scumm
 
 d_sum_2 |> count(clusters)
 
@@ -189,282 +256,9 @@ d_sum_2 |> group_by(clusters) |>
 ```
 
 
-#Three clusters exploration
-```{r}
-
-clust <- cutree(h_clusts_scumm, k = 3)
-d3$clusters <- clust
-
-
-fviz_pca_biplot(pca_res_2, 
-                habillage = d3$clusters,
-                invisible = "var"
-                ) 
-
-
-d_sum_3 <- d3 %>% 
-  full_join(pca_2_df) |> 
-  rownames_to_column() |> 
-  unite(col = rowname, c(1,2,3,4,5,6), remove = FALSE) |> 
-  column_to_rownames(var = "rowname") |> 
-  mutate(clusters = as.factor(clusters)) |> 
-  mutate(across(where(is.character), as.factor))
-
-summary_d3_3 <- d_sum_3 |> 
-  group_by(clusters) |> 
-  summarise(
-    count = n(),
-    blank = sum(color == "blank"),
-    red = sum(color == "red"),
-    black = sum(color == "black"),
-    white = sum(color == "white"),
-    brown = sum(color == "brown"),
-    Fe_Mn = sum(color == "Fe&Mn"),
-    w_luster = sum(luster == "w/Luster"),
-    wo_luster = sum(luster == "w/o Luster"),
-    tablets = sum(source == "Tablets"),
-    clays = sum(source == "Clays"),
-    pigments = sum(source == "Pigments"),
-    arch = sum(source == "Arch"),
-    w_slip = sum(slip == "slip"),
-    wo_slip = sum(slip == "w/o"),
-    scumming = sum(slip == "scumming")
-  ) |> 
-  t() |> #transpose
-  as.data.frame() |> 
-  row_to_names(row_number = 1)
-
-d_sum_3 |> count(clusters)
-
-d_sum_3 |> group_by(clusters) |> 
-  count(source,color, sort = T) |> 
-  arrange(clusters) |>
-  print(n = 29)
-
-d_sum_3 |> group_by(clusters) |> 
-  count(slip, luster, sort = T) |> 
-  arrange(clusters, slip) |>
-  print(n = 40) 
-
-d_sum_3 |> 
-  group_by(clusters) |> 
-  count(luster, sort = TRUE) |> 
-  arrange(clusters, luster) |> 
-  ggplot(aes(x = clusters, y = n, 
-             fill = interaction(luster))) +
-  geom_col(position = "dodge") +   # or "stack" depending on desired look
-  labs(x = "Cluster", 
-       y = "Count", 
-       fill = "Legend") +
-  theme_minimal() +
-  scale_fill_viridis(discrete = T)
-
-d_sum_3 |> 
-  group_by(clusters) |> 
-  count(slip, sort = TRUE) |> 
-  arrange(clusters, slip) |> 
-  ggplot(aes(x = clusters, y = n, 
-             fill = interaction(slip))) +
-  geom_col(position = "dodge") +   # or "stack" depending on desired look
-  labs(x = "Cluster", 
-       y = "Count", 
-       fill = "Legend") +
-  theme_minimal() +
-  scale_fill_viridis(discrete = T)
-
-d_sum_3 |> 
-  group_by(clusters) |> 
-  count(color, sort = TRUE) |> 
-  arrange(clusters, color) |> 
-  ggplot(aes(x = clusters, y = n, 
-             fill = interaction(color))) +
-  geom_col(position = "dodge") +   # or "stack" depending on desired look
-  labs(x = "Cluster", 
-       y = "Count", 
-       fill = "Legend") +
-  theme_minimal() +
-  scale_fill_viridis(discrete = T)
-
-d_sum_3 |> 
-  group_by(clusters) |> 
-  count(slip, luster, color, sort = TRUE) |> 
-  arrange(clusters) |> 
-  # Create a single label that identifies each bar uniquely
-  mutate(bar_label = paste(clusters, slip, luster, color, sep = " | ")) |> 
-  ggplot(aes(x = bar_label, y = n)) +
-  geom_col() +
-  theme_minimal() +
-  theme(axis.text.x = element_text(angle = 65, hjust = 1)) +
-  labs(x = "Cluster | slip | lustre | color", y = "Count")
-
-d_sum_3 |> group_by(clusters) |> 
-  count(slip,luster, sort = T) |> 
-  arrange(clusters)
-
-```
-
-# Verification: bandwiths from 600-700
-
-```{r}
-d_verif <- ftir_pigmenti |> 
-    filter(Source_ID_Color_Luster_Slip...2 >= 600 & Source_ID_Color_Luster_Slip...2 <= 7000) 
-
-d_veriff <- d_verif |> 
-   data.table::transpose() 
-
-rownames(d_veriff) <- colnames(d_verif)
-
-d_veriff <- d_veriff |>  
-  scrutiny::row_to_colnames(row = 1:2, collapse = "_", drop = T) |> 
-  clean_names() |> 
-  mutate(across(where(is.character), as.numeric)) |> 
-  rownames_to_column(var = "full_info") |> 
-  separate(col = full_info, into = c("source","id", "color", "luster", "slip"), sep = "_", remove = F) |> 
-   mutate(slip = str_remove_all(slip, "\\.\\.\\.\\d+")) |> 
-  rownames_to_column(var = "ID") |> 
-  unite("rowname", "ID", "id", "slip", remove = F) |> 
-  column_to_rownames(var = "rowname")
- 
-df_veriff_centr <- d_veriff[,-c(1:7)] |> 
-  scale() |> 
-  as.data.frame() 
-
-distance_matrix_veriff <- psych::distance(df_veriff_centr)
-distance_matrix_veriff <- as.matrix(distance_matrix_veriff)
-internal_validation_veriff <- clValid(distance_matrix_veriff, 2:8, 
-                               clMethods = c("agnes"),
-                               validation = c("internal", "stability"))
-summary(internal_validation_veriff)
-
-
-dist_mat_veriff <- get_dist(df_veriff_centr, method = "minkowski")
-
-h_clusts_veriff <- hclust(dist_mat_veriff, method = "ward.D2")  
- plot(h_clusts_veriff)
- 
-clust_veriff <- cutree(h_clusts_veriff, k = 2)
-d3$clusters <- as.factor(clust_veriff)
-
-pca_res_3 <- PCA(d3[,-c(1:7, 139)], 
-                    graph = F,
-                    )
-fviz_pca_biplot(pca_res_3, 
-                habillage = d3$clusters,
-                invisible = "var") 
-
-pca_veriff_df <- pca_res_3$ind$coord |> as.data.frame() |> 
-  as_tibble() |>
-  rownames_to_column(var = "ID")
-
-d_sum_3 <- d3 %>% 
-  full_join(pca_veriff_df) |> 
-  rownames_to_column() |> 
-  unite(col = rowname, c(1,2,3,4,5,6), remove = FALSE) |> 
-  column_to_rownames(var = "rowname") |> 
-  mutate(clusters = as.factor(clusters)) |> 
-  mutate(across(where(is.character), as.factor))
-
-summary_d3_veriff <- d_sum_3 |> 
-  group_by(clusters) |> 
-  summarise(
-    count = n(),
-    blank = sum(color == "blank"),
-    red = sum(color == "red"),
-    black = sum(color == "black"),
-    white = sum(color == "white"),
-    brown = sum(color == "brown"),
-    Fe_Mn = sum(color == "Fe&Mn"),
-    w_luster = sum(luster == "w/Luster"),
-    wo_luster = sum(luster == "w/o Luster"),
-    tablets = sum(source == "Tablets"),
-    clays = sum(source == "Clays"),
-    pigments = sum(source == "Pigments"),
-    arch = sum(source == "Arch"),
-    w_slip = sum(slip == "slip"),
-    wo_slip = sum(slip == "w/o"),
-    scumming = sum(slip == "scumming")
-  ) |> 
-  t() |> #transpose
-  as.data.frame() |> 
-  row_to_names(row_number = 1)
-
-d_sum_3 |> count(clusters)
-
-d_sum_2 |> group_by(clusters) |> 
-  count(source,color, sort = T) |> 
-  arrange(clusters) |>
-  print(n = 29)
-
-d_sum_3 |> group_by(clusters) |> 
-  count(slip, luster, sort = T) |> 
-  arrange(clusters, slip) |>
-  print(n = 40) 
-
-d_sum_3 |> 
-  group_by(clusters) |> 
-  count(luster, sort = TRUE) |> 
-  arrange(clusters, luster) |> 
-  ggplot(aes(x = clusters, y = n, 
-             fill = interaction(luster))) +
-  geom_col(position = "dodge") +   # or "stack" depending on desired look
-  labs(x = "Cluster", 
-       y = "Count", 
-       fill = "Legend") +
-  theme_minimal() +
-  scale_fill_viridis(discrete = T)
-
-d_sum_3 |> 
-  group_by(clusters) |> 
-  count(slip, sort = TRUE) |> 
-  arrange(clusters, slip) |> 
-  ggplot(aes(x = clusters, y = n, 
-             fill = interaction(slip))) +
-  geom_col(position = "dodge") +   # or "stack" depending on desired look
-  labs(x = "Cluster", 
-       y = "Count", 
-       fill = "Legend") +
-  theme_minimal() +
-  scale_fill_viridis(discrete = T)
-
-d_sum_3 |> 
-  group_by(clusters) |> 
-  count(color, sort = TRUE) |> 
-  arrange(clusters, color) |> 
-  ggplot(aes(x = clusters, y = n, 
-             fill = interaction(color))) +
-  geom_col(position = "dodge") +   # or "stack" depending on desired look
-  labs(x = "Cluster", 
-       y = "Count", 
-       fill = "Legend") +
-  theme_minimal() +
-  scale_fill_viridis(discrete = T)
-
-d_sum_3 |> 
-  group_by(clusters) |> 
-  count(slip, luster, color, sort = TRUE) |> 
-  arrange(clusters) |> 
-  # Create a single label that identifies each bar uniquely
-  mutate(bar_label = paste(clusters, slip, luster, color, sep = " | ")) |> 
-  ggplot(aes(x = bar_label, y = n)) +
-  geom_col() +
-  theme_minimal() +
-  theme(axis.text.x = element_text(angle = 65, hjust = 1)) +
-  labs(x = "Cluster | slip | lustre | color", y = "Count")
-
-d_sum_3 |> group_by(clusters) |> 
-  count(slip,luster, sort = T) |> 
-  arrange(clusters)
-```
-
-
-# Reset number of Clusters back to two
-
-```{r}
-clust <- cutree(h_clusts_scumm, k = 2)
-d3$clusters <- as.factor(clust)
-```
 
 ######PCA - visualisations - eigen values
+
 
 ```{r}
 eigen_values <- pca_res_2$eig |> 
@@ -539,7 +333,7 @@ coord_ind <-
 graph_ind_1 <- coord_ind |> 
   mutate(rowname = fct_reorder(rowname, Dim.1, .desc = T)) |> 
   ggplot(aes(Dim.1, rowname)) +
-  geom_col(aes(colour = d3$clusters, fill = d3$clusters)) +
+  geom_col(aes(colour = as.factor(df_scumm$clusters), fill = as.factor(df_scumm$clusters))) +
   theme(legend.position = "inside",
     legend.position.inside = c(1,1),
     legend.justification.inside = c(1,1),
@@ -562,5 +356,72 @@ graph_CP1 <- graph_dim1_cors / graph_ind_1 +
   plot_annotation(title = "CP 1")
 graph_CP1
 
+```
+
+# Verification: bandwiths from 600-700
+
+```{r}
+d_verif <- ftir_pigmenti |> 
+    filter(Source_ID_Color_Luster_Slip...2 >= 600 & Source_ID_Color_Luster_Slip...2 <= 700) 
+
+d_veriff <- d_verif |> 
+   data.table::transpose() 
+
+rownames(d_veriff) <- colnames(d_verif)
+
+d_veriff <- d_veriff |>  
+  scrutiny::row_to_colnames(row = 1:2, collapse = "_", drop = T) |> 
+  clean_names() |> 
+  mutate(across(where(is.character), as.numeric)) |> 
+  rownames_to_column(var = "full_info") |> 
+  separate(col = full_info, into = c("source","id", "color", "luster", "slip"), sep = "_", remove = F) |> 
+   mutate(slip = str_remove_all(slip, "\\.\\.\\.\\d+")) |> 
+  rownames_to_column(var = "ID") |> 
+  unite("rowname", "ID", "id", "slip", remove = F) |> 
+  column_to_rownames(var = "rowname")
+
+spec_data_2 <- d_veriff[, 8:ncol(d_veriff)]   # adjust indices if needed
+
+# 1. Baseline correction using the rubber-band method
+#    (requires the 'baseline' package)
+library(baseline)
+# List of spectra as a matrix (rows = samples, cols = wavenumbers)
+spec_mat_2 <- as.matrix(spec_data_2)
+spec_bl_2 <- baseline(spec_mat_2)
+spec_bl_2 <- getCorrected(spec_bl_2)
+
+# 2. SNV (Standard Normal Variate) – on raw, baseline‑corrected, and derivative data
+spec_SNV_raw_2 <- prospectr::standardNormalVariate(spec_mat_2)
+spec_SNV_bl_2 <- prospectr::standardNormalVariate(spec_bl_2)
+
+# 3. Savitzky–Golay 1st derivative (2nd order polynomial, 11‑point window)
+#    applied after baseline correction + SNV (recommended pipeline)
+spec_d3 <- prospectr::savitzkyGolay(spec_SNV_bl_2, p = 2, w = 11, m = 1)
+
+# ---------- Define the four pre‑processing variants ----------
+preproc_list_2 <- list(
+  "Raw + scale" = scale(spec_mat_2),              # original approach
+  "Baseline + scale" = scale(spec_bl_2),
+  "SNV (no deriv.)" = spec_SNV_bl_2,                  # SNV normalised, no further scaling
+  "SNV + 1st derivative"   = scale(spec_d3)                # scaling optional but harmless
+)
+
+# ---------- Cluster validation for each variant ----------
+valid_res_2 <- vector("list", length(preproc_list_2))
+names(valid_res_2) <- names(preproc_list_2)
+
+for (i in seq_along(preproc_list_2)) {
+  X <- preproc_list_2[[i]]
+  d <- dist(X, method = "euclidean")
+  d <- as.matrix(d)
+  valid_res[[i]] <- clValid(d, nClust = 2:6, clMethods = "agnes",
+                            validation = c("internal", "stability"))
+}
+
+# Print summaries – optimal k per variant
+for (nm in names(preproc_list_2)) {
+  cat("\n", nm, "\n")
+  print(summary(valid_res[[nm]]))
+}
 ```
 
